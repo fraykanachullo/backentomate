@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 
 ---
 
@@ -187,3 +188,6 @@ YOLOv8	8.3.0	Modelo de detección
 PyTorch	2.5.1	Deep Learning
 OpenCV	4.10.0	Procesamiento de imágenes
 Pillow	11.0.0	Manipulación de imágenes
+=======
+# backentomate
+>>>>>>> e1b8541abede425e33e40d0ba2fc97bab327416c
