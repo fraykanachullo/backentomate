@@ -35,5 +35,16 @@ MANIFEST
 # *.onnx
 # *.tflite
 
+# DB local
+tomate.db
+tomate.db-journal
+
+# Env
+.env
+!.env.example
+
 # Logs
 *.log
+# Tests
+test.db
+test.db-journal

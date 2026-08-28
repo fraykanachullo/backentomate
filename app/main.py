@@ -1,6 +1,6 @@
 import io
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -9,148 +9,162 @@ import numpy as np
 from ultralytics import YOLO
 import uvicorn
 
-# =====================================================
-# CONFIGURACIÓN DEL MODELO
-# =====================================================
+from contextlib import asynccontextmanager
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+from app.core.config import settings
+from app.core.middleware import RequestIDMiddleware
+from app.api.v1.router import api_router
+from app.database.session import init_db
 
-# Ruta del modelo entrenado
-MODEL_PATH = os.getenv("MODEL_PATH", "app/models/best.pt")
-
-# Cargar modelo YOLOv8
+# =====================================================
+# CARGA DEL MODELO
+# =====================================================
+MODEL_PATH = settings.model_path
 model = YOLO(MODEL_PATH)
+print(f"Modelo cargado desde: {MODEL_PATH}")
+print(f"Clases del modelo: {model.names}")
 
-# Verificar que el modelo cargó correctamente
-print(f" Modelo cargado desde: {MODEL_PATH}")
-print(f" Clases del modelo: {model.names}")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: crear tablas si no existen
+    await init_db()
+    print("DB inicializada")
+    yield
 
 # =====================================================
-# APLICACIÓN FASTAPI
+# APP FASTAPI
 # =====================================================
-
 app = FastAPI(
-    title="Tomate Disease Detection API",
-    description="API para detección de enfermedades y plagas del tomate - UPEU",
-    version="2.0.0"
+    title=settings.app_name,
+    description="API para deteccion de enfermedades y plagas del tomate - UPEU",
+    version=settings.app_version,
+    lifespan=lifespan,
 )
 
-# Configurar CORS para permitir conexiones desde Flutter
+# Middleware
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción, restringir a dominios específicos
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Static para uploads locales (fallback cuando Supabase no configurado)
+uploads_path = Path("uploads")
+uploads_path.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
+
+# Router versionado /api/v1
+app.include_router(api_router)
+
 # =====================================================
-# ENDPOINTS
+# ENDPOINTS LEGACY (compatibilidad con app actual)
+# Se mantienen para no romper la app Flutter existente.
+# En Fase A.6 el endpoint canonico sera POST /api/v1/diagnostic/detect
 # =====================================================
 
-@app.get("/")
+@app.get("/", tags=["legacy"])
 async def root():
     return {
-        "message": "API de Detección de Enfermedades del Tomate",
+        "message": "API de Deteccion de Enfermedades del Tomate",
         "status": "online",
-        "version": "2.0.0",
-        "model_classes": model.names
+        "version": settings.app_version,
+        "model_classes": model.names,
     }
 
-@app.get("/health")
-async def health():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
-@app.get("/classes")
+@app.get("/health", tags=["legacy"])
+async def health_legacy():
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/classes", tags=["legacy"])
 async def get_classes():
-    """Retorna la lista de clases que el modelo puede detectar"""
     return {
         "status": "success",
         "data": {
             "classes": list(model.names.values()),
-            "total": len(model.names)
-        }
+            "total": len(model.names),
+        },
     }
 
-@app.post("/detect")
+
+@app.post("/detect", tags=["legacy"])
 async def detect(file: UploadFile = File(...)):
     """
-    Endpoint para detectar enfermedades en imágenes de tomate
-    
-    Recibe: Imagen (JPG, PNG, HEIC)
-    Retorna: Lista de detecciones con enfermedad, confianza y bounding boxes
+    Endpoint legacy para compatibilidad.
+    Recibe: Imagen (JPG, PNG)
+    Retorna: Lista de detecciones con enfermedad, confianza y bbox normalizados.
     """
     try:
-        # 1. Leer la imagen
         contents = await file.read()
+        if len(contents) > settings.max_upload_size_mb * 1024 * 1024:
+            raise HTTPException(status_code=413, detail=f"Archivo supera {settings.max_upload_size_mb} MB")
+
         image = Image.open(io.BytesIO(contents))
+        # Validar formato por magic bytes basico: verificar que PIL pudo abrir
         image_np = np.array(image)
-        
-        # 2. Obtener dimensiones de la imagen
+        if image_np.size == 0:
+            raise HTTPException(status_code=400, detail="Imagen invalida o vacia")
+
         height, width = image_np.shape[:2]
-        print(f"📐 Dimensiones de la imagen: {width}x{height}")
-        
-        # 3. Realizar inferencia con YOLO
+        if width < 320 or height < 320:
+            raise HTTPException(status_code=400, detail="Imagen muy pequena, minimo 320x320")
+
+        print(f"Dimensiones: {width}x{height}")
+
         results = model(image_np)
-        
-        # 4. Procesar resultados
+
         detections = []
         for r in results:
             boxes = r.boxes
             if boxes is not None:
                 for box in boxes:
-                    # Obtener coordenadas
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
                     confidence = float(box.conf[0])
                     class_id = int(box.cls[0])
                     class_name = model.names[class_id]
-                    
-                    # Normalizar coordenadas a [0, 1]
+
                     x1_norm = round(x1 / width, 4)
                     y1_norm = round(y1 / height, 4)
                     x2_norm = round(x2 / width, 4)
                     y2_norm = round(y2 / height, 4)
-                    
-                    # Filtrar por confianza mínima (0.25 para pruebas, 0.5 en producción)
-                    if confidence > 0.25:
+
+                    if confidence > settings.confidence_threshold:
                         detections.append({
                             "disease": class_name,
                             "confidence": round(confidence * 100, 2),
-                            "bbox": [x1_norm, y1_norm, x2_norm, y2_norm]
+                            "bbox": [x1_norm, y1_norm, x2_norm, y2_norm],
                         })
-        
-        # 5. Log de resultados
-        print(f"🔍 Detecciones encontradas: {len(detections)}")
-        if detections:
-            print(f"📦 Detecciones: {detections}")
-        
-        # 6. Preparar respuesta
+
+        print(f"Detecciones: {len(detections)}")
+
         response = {
             "status": "success",
-            "message": "Diagnóstico completado",
+            "message": "Diagnostico completado",
             "data": {
                 "detections": detections,
                 "total": len(detections),
-                "processed_at": datetime.now().isoformat()
-            }
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            },
         }
-        
         return JSONResponse(content=response)
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error al procesar la imagen: {str(e)}"
-        )
 
-# =====================================================
-# EJECUCIÓN DEL SERVIDOR
-# =====================================================
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al procesar la imagen: {str(e)}")
+
 
 if __name__ == "__main__":
     uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
+        "app.main:app",
+        host=settings.host,
+        port=settings.port,
         reload=True,
-        log_level="info"
+        log_level=settings.log_level,
     )
