@@ -4,9 +4,8 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from PIL import Image
+from PIL import Image, ImageOps
 import numpy as np
-from ultralytics import YOLO
 import uvicorn
 
 from contextlib import asynccontextmanager
@@ -15,21 +14,36 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.middleware import RequestIDMiddleware
 from app.api.v1.router import api_router
-from app.database.session import init_db
+from app.database.session import init_db, AsyncSessionLocal
 
 # =====================================================
 # CARGA DEL MODELO
 # =====================================================
+# Una sola instancia compartida con /api/v1 (yolo_engine valida que las clases coincidan)
+from app.services.inference.yolo_engine import engine
 MODEL_PATH = settings.model_path
-model = YOLO(MODEL_PATH)
-print(f"Modelo cargado desde: {MODEL_PATH}")
-print(f"Clases del modelo: {model.names}")
+model = engine.model
+
+async def seed_admin():
+    """Crea el usuario ADMIN maestro (credenciales en .env) si aun no existe."""
+    from sqlalchemy import select
+    from app.models.orm.user import User
+    from app.core.security import hash_password
+    async with AsyncSessionLocal() as db:
+        email = settings.admin_email.lower()
+        result = await db.execute(select(User).where(User.email == email))
+        if result.scalars().first() is None:
+            db.add(User(name=settings.admin_name, email=email,
+                        password_hash=hash_password(settings.admin_password), role="ADMIN"))
+            await db.commit()
+            print(f"Admin maestro creado: {email}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: crear tablas si no existen
     await init_db()
     print("DB inicializada")
+    await seed_admin()
     yield
 
 # =====================================================
@@ -53,8 +67,8 @@ app.add_middleware(
 )
 
 # Static para uploads locales (fallback cuando Supabase no configurado)
-uploads_path = Path("uploads")
-uploads_path.mkdir(exist_ok=True)
+uploads_path = Path(settings.upload_dir)
+uploads_path.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
 
 # Router versionado /api/v1
@@ -104,19 +118,26 @@ async def detect(file: UploadFile = File(...)):
         if len(contents) > settings.max_upload_size_mb * 1024 * 1024:
             raise HTTPException(status_code=413, detail=f"Archivo supera {settings.max_upload_size_mb} MB")
 
-        image = Image.open(io.BytesIO(contents))
-        # Validar formato por magic bytes basico: verificar que PIL pudo abrir
-        image_np = np.array(image)
-        if image_np.size == 0:
+        # exif_transpose: aplica la rotacion EXIF de la camara para que las
+        # coordenadas coincidan con la imagen que muestra la app.
+        # Se pasa PIL RGB (no numpy): Ultralytics asume BGR en arrays numpy.
+        image = ImageOps.exif_transpose(Image.open(io.BytesIO(contents))).convert("RGB")
+        width, height = image.size
+        if width == 0 or height == 0:
             raise HTTPException(status_code=400, detail="Imagen invalida o vacia")
-
-        height, width = image_np.shape[:2]
         if width < 320 or height < 320:
             raise HTTPException(status_code=400, detail="Imagen muy pequena, minimo 320x320")
 
         print(f"Dimensiones: {width}x{height}")
 
-        results = model(image_np)
+        results = model(
+            image,
+            conf=settings.confidence_threshold,
+            iou=settings.iou_threshold,
+            imgsz=settings.image_size,
+            agnostic_nms=True,  # una sola caja por zona aunque compitan clases
+            verbose=False,
+        )
 
         detections = []
         for r in results:
@@ -133,7 +154,7 @@ async def detect(file: UploadFile = File(...)):
                     x2_norm = round(x2 / width, 4)
                     y2_norm = round(y2 / height, 4)
 
-                    if confidence > settings.confidence_threshold:
+                    if confidence >= settings.confidence_threshold:
                         detections.append({
                             "disease": class_name,
                             "confidence": round(confidence * 100, 2),
@@ -148,6 +169,7 @@ async def detect(file: UploadFile = File(...)):
             "data": {
                 "detections": detections,
                 "total": len(detections),
+                "image_size": {"width": width, "height": height},
                 "processed_at": datetime.now(timezone.utc).isoformat(),
             },
         }

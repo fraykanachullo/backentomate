@@ -1,6 +1,7 @@
 import time
 from ultralytics import YOLO
 from app.core.config import settings
+from app.services.inference.class_names import CLASS_NAMES
 
 # Intentar pybreaker, fallback a dummy si no está instalado
 try:
@@ -25,6 +26,12 @@ class InferenceEngine:
             print(f"[YOLO] Cargando modelo {settings.model_path}")
             self._model = YOLO(settings.model_path)
             print(f"[YOLO] Clases: {self._model.names}")
+            model_names = {int(key): value for key, value in self._model.names.items()}
+            if model_names != CLASS_NAMES:
+                raise RuntimeError(
+                    f"Las clases de {settings.model_path} no coinciden con CLASS_NAMES: "
+                    f"modelo={model_names}, configuradas={CLASS_NAMES}"
+                )
 
     @property
     def model(self):
@@ -36,11 +43,12 @@ class InferenceEngine:
     def names(self):
         return self.model.names
 
-    def predict(self, image, conf=None, iou=None):
+    def predict(self, image, conf=None, iou=None, imgsz=None):
         conf = conf if conf is not None else settings.confidence_threshold
         iou = iou if iou is not None else settings.iou_threshold
+        imgsz = imgsz if imgsz is not None else settings.image_size
         def _call():
-            return self.model(image, conf=conf, iou=iou, verbose=False)
+            return self.model(image, conf=conf, iou=iou, imgsz=imgsz, agnostic_nms=True, verbose=False)
         # Si breaker es dummy, call directo; si es pybreaker, usa breaker.call
         try:
             if hasattr(breaker, 'call') and 'pybreaker' in str(type(breaker)):

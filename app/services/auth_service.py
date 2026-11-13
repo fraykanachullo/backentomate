@@ -35,8 +35,8 @@ async def register_user(db: AsyncSession, name: str, email: str, password: str, 
             raise HTTPException(status_code=403, detail="Solo un administrador puede crear administradores")
 
     # Validaciones
-    if len(password) < 8:
-        raise HTTPException(status_code=422, detail="La contraseña debe tener mínimo 8 caracteres")
+    if len(password) < 6:
+        raise HTTPException(status_code=422, detail="La contraseña debe tener mínimo 6 caracteres")
     if role not in ("ADMIN", "FIELD_TECH"):
         raise HTTPException(status_code=422, detail="Rol inválido")
 

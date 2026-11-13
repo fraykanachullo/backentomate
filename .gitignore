@@ -48,3 +48,8 @@ tomate.db-journal
 # Tests
 test.db
 test.db-journal
+
+# Fotos de usuarios y salidas locales (no subir)
+uploads/
+runs/
+*.db

@@ -4,11 +4,11 @@ Fuente: doc_tecnica 2.2.2 y 4.3
 """
 
 CLASS_NAMES = {
-    0: "sana",
-    1: "mildiu",
+    0: "mildiu",
+    1: "mosca_blanca",
     2: "oidio",
-    3: "mosca_blanca",
-    4: "polilla",
+    3: "polilla",
+    4: "sana",
 }
 
 # Reverse map

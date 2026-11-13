@@ -1,0 +1,11 @@
+# Nunca dentro de la imagen: entornos locales, secretos y datos
+venv311/
+venv/
+.env
+*.db
+uploads/
+.git/
+.pytest_cache/
+**/__pycache__/
+tests/
+scripts/

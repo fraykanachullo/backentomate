@@ -39,7 +39,10 @@ class Settings(BaseSettings):
     # --- Model ---
     model_path: str = "app/models/best.pt"
     max_upload_size_mb: int = 5
-    confidence_threshold: float = 0.40
+    # Carpeta de imagenes (en el servidor: un disco persistente, p.ej. /data/uploads)
+    upload_dir: str = "uploads"
+    image_size: int = 640
+    confidence_threshold: float = 0.30
     iou_threshold: float = 0.45
 
     # --- CORS ---
@@ -50,6 +53,11 @@ class Settings(BaseSettings):
         if self.cors_origins == "*":
             return ["*"]
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    # --- Admin maestro (se crea al arrancar si no existe) ---
+    admin_name: str = "Administrador"
+    admin_email: str = "admin@tomate.com"
+    admin_password: str = "cambiar_esta_clave"  # el valor real va en .env (ADMIN_PASSWORD)
 
     # --- Rate limiting ---
     rate_limit_login: str = "5/minute"

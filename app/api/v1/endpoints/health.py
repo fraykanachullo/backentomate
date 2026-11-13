@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from app.database.session import get_db
 from app.services.inference.yolo_engine import engine
+from app.services.inference.model_info import MODEL_INFO
 
 router = APIRouter()
 
@@ -33,7 +34,7 @@ async def health_detailed(db: AsyncSession = Depends(get_db)):
     # Model
     try:
         names = engine.names
-        checks["model"] = {"status": "loaded", "classes": list(names.values()) if isinstance(names, dict) else list(names)}
+        checks["model"] = {"status": "loaded", "classes": list(names.values()) if isinstance(names, dict) else list(names), "info": MODEL_INFO}
     except Exception as e:
         checks["model"] = {"status": "down", "error": str(e)}
     # Storage

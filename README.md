@@ -1,193 +1,129 @@
-<<<<<<< HEAD
+# Tomate Detection API
 
----
+API FastAPI para detectar enfermedades y plagas del tomate con un modelo YOLOv8n entrenado en Roboflow.
 
-## 📄 **README.md para el BACKEND**
+## Modelo verificado
+
+El archivo `app/models/best.pt` se carga como detector YOLO y actualmente contiene estas clases, en este orden exacto:
+
+| ID | Clase |
+|---:|---|
+| 0 | `mildiu` |
+| 1 | `mosca_blanca` |
+| 2 | `oidio` |
+| 3 | `polilla` |
+| 4 | `sana` |
+
+El backend comprueba esta correspondencia al iniciar. Si se cambia `best.pt`, también se debe revisar el orden de clases exportado por Roboflow.
+
+## Configuración de inferencia
+
+Los valores por defecto son:
+
+```env
+MODEL_PATH=app/models/best.pt
+IMAGE_SIZE=640
+CONFIDENCE_THRESHOLD=0.40
+IOU_THRESHOLD=0.45
+MAX_UPLOAD_SIZE_MB=5
+```
+
+`IMAGE_SIZE=640` coincide con el entrenamiento habitual de YOLOv8n. `CONFIDENCE_THRESHOLD=0.40` es un punto inicial; se debe ajustar con imágenes de validación del campo. Para menos falsos positivos, subirlo a `0.50-0.60`; para detectar casos débiles, probar `0.25-0.35`. `IOU_THRESHOLD=0.45` controla la supresión de cajas duplicadas y no reemplaza una validación de precisión/recall.
+
+## Ejecución local
 
 ```powershell
-notepad D:\tomate_backend\README.md
-
-
-
-# 🍅 Tomate Detection App - Backend
-
-![Python](https://img.shields.io/badge/Python-3.11-blue.svg)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-green.svg)
-![YOLOv8](https://img.shields.io/badge/YOLOv8-8.3.0-red.svg)
-
-Backend para la detección de enfermedades y plagas en cultivos de tomate, utilizando FastAPI y YOLOv8.
-
----
-
-## 🚀 **Descripción**
-
-Este backend proporciona una API REST para la inferencia de enfermedades en imágenes de tomate. Utiliza un modelo YOLOv8 entrenado con un dataset de 4,602 imágenes recolectadas en campo (Majes, Arequipa).
-
-### 🎯 **Características Principales**
-
-- ✅ **Inferencia con YOLOv8** (GPU/CPU)
-- ✅ **API REST** con FastAPI
-- ✅ **CORS habilitado** para conexión con Flutter
-- ✅ **Soporte para múltiples formatos** (JPG, PNG, HEIC)
-- ✅ **Respuesta en JSON** con bounding boxes
-- ✅ **Optimizado para zonas áridas** (Majes, Arequipa)
-
----
-
-## 🏗️ **Arquitectura del Proyecto**
-app/
-├── main.py # Punto de entrada de la API
-├── models/
-│ └── best.pt # Modelo YOLOv8 entrenado
-└── services/
-└── inference.py # Servicio de inferencia
-
-models/ # Modelos de Deep Learning
-├── best.pt # Modelo principal (6.0 MB)
-├── best.onnx # Modelo en formato ONNX
-├── best_int8.tflite # Modelo para móvil (3.1 MB)
-└── configs/
-├── dataset.yaml # Configuración del dataset
-└── class_mapping.json # Mapeo de clases
-
-
----
-
-## 🔧 **Requisitos Previos**
-
-| Software | Versión |
-|----------|---------|
-| **Python** | 3.11 o superior |
-| **pip** | Última versión |
-| **Git** | (Opcional) |
-
----
-
-## 📦 **Instalación y Configuración**
-
-### **1. Clonar el repositorio**
-
-```bash
-git clone https://github.com/fraykanachullo/BackendAPPTOMATE.git
-cd BackendAPPTOMATE
-
-
-
-Crear entorno virtual
-# En Windows
-python -m venv venv
-venv\Scripts\activate
-
-# En macOS/Linux
-python3 -m venv venv
-source venv/bin/activate
-
-
-*** Instalar dependencias ****
+venv311\Scripts\Activate.ps1
 pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
+```
 
+Servidor: `http://localhost:8000`
 
+## Subir una imagen desde el frontend
 
- Verificar el modelo
-Asegúrate que el archivo app/models/best.pt exista. Si no, descárgalo o coloca tu modelo entrenado.
+Endpoint canónico:
 
-5. Ejecutar el servidor
-bash
-python app/main.py
-Verás:
-
-text
-✅ Modelo cargado desde: app/models/best.pt
-✅ Clases del modelo: {0: 'mildiu', 1: 'mosca_blanca', 2: 'oidio', 3: 'polilla', 4: 'sana'}
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-📡 Endpoints de la API
-GET /health
-Verifica el estado del servidor.
-
-Respuesta:
-
-json
-{"status": "healthy"}
-GET /classes
-Obtiene las clases que el modelo puede detectar.
-
-Respuesta:
-
-json
-{
-  "status": "success",
-  "data": {
-    "classes": ["mildiu", "mosca_blanca", "oidio", "polilla", "sana"],
-    "total": 5
-  }
-}
-POST /detect
-Envía una imagen para diagnóstico.
-
-Request:
-
-Método: POST
-
+```text
+POST /api/v1/diagnostic/detect
+Authorization: Bearer <access_token>
 Content-Type: multipart/form-data
+```
 
-Body: file (imagen en JPG, PNG o HEIC)
+Campos multipart:
 
-Respuesta (200 OK):
+- `file`: obligatorio; JPEG o PNG recomendado, mínimo `320x320`, máximo `5 MB`.
+- `metadata`: opcional; texto JSON con `plot_id`, ubicación y datos del dispositivo.
 
-json
+Ejemplo:
+
+```javascript
+const form = new FormData();
+form.append("file", imageFile);
+form.append("metadata", JSON.stringify({
+  plot_id: plotId,
+  latitude: -16.3,
+  longitude: -72.2,
+  altitude: 1450,
+  gps_accuracy_meters: 8,
+  timestamp_utc: new Date().toISOString(),
+  device_model: "Android",
+  app_version: "1.0.0",
+  quality_warning: false
+}));
+
+const response = await fetch(`${API_URL}/api/v1/diagnostic/detect`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${accessToken}` },
+  body: form
+});
+const diagnostic = await response.json();
+```
+
+No se debe establecer manualmente `Content-Type` al usar `FormData`; el navegador agrega el boundary correcto.
+
+## Respuesta para pintar cajas
+
+Cada detección incluye `confidence_score` entre `0` y `1` y una caja normalizada entre `0` y `1` respecto a la imagen original:
+
+```json
 {
-  "status": "success",
-  "message": "Diagnóstico completado",
-  "data": {
-    "detections": [
-      {
-        "disease": "mildiu",
-        "confidence": 67.45,
-        "bbox": [0.0271, 0.7435, 0.145, 0.8572]
-      }
-    ],
-    "total": 1,
-    "processed_at": "2026-06-30T17:52:45.056358"
+  "disease_label": "oidio",
+  "disease_name_spanish": "Oidío / Cenicilla",
+  "confidence_score": 0.87,
+  "severity_level": "SEVERE",
+  "bounding_box": {
+    "x_min": 0.12,
+    "y_min": 0.18,
+    "x_max": 0.66,
+    "y_max": 0.82,
+    "coordinate_space": "normalized_0_to_1",
+    "reference": "original_image_dimensions"
   }
 }
-🚀 Comandos Útiles
-Comando	Descripción
-python app\main.py	Ejecutar el servidor
-CTRL + C	Detener el servidor
-pip install -r requirements.txt	Instalar dependencias
-venv\Scripts\activate	Activar entorno virtual
-📁 Estructura de Carpetas
-text
-app/
-├── main.py                        # ✅ Punto de entrada
-├── models/
-│   └── best.pt                    # ✅ Modelo YOLOv8
-└── services/
-    └── inference.py               # Servicio de inferencia
+```
 
-models/                            # Modelos de Deep Learning
-├── best.pt                        # Modelo principal (6.0 MB)
-├── best.onnx                      # Modelo en formato ONNX
-├── best_int8.tflite               # Modelo para móvil (3.1 MB)
-└── configs/
-    ├── dataset.yaml               # Configuración del dataset
-    └── class_mapping.json         # Mapeo de clases
-📊 Clases Detectables
-Clase	Nombre Científico	Tipo
-mildiu	Phytophthora infestans	Enfermedad
-mosca_blanca	Bemisia tabaci	Plaga
-oidio	Leveillula taurica	Enfermedad
-polilla	Tuta absoluta	Plaga
-sana	-	Saludable
-🛠️ Tecnologías Utilizadas
-Tecnología	Versión	Uso
-Python	3.11	Lenguaje principal
-FastAPI	0.115.6	Framework web
-Uvicorn	0.34.0	Servidor ASGI
-YOLOv8	8.3.0	Modelo de detección
-PyTorch	2.5.1	Deep Learning
-OpenCV	4.10.0	Procesamiento de imágenes
-Pillow	11.0.0	Manipulación de imágenes
-=======
-# backentomate
->>>>>>> e1b8541abede425e33e40d0ba2fc97bab327416c
+Para dibujar sobre un widget de ancho `W` y alto `H`:
+
+```text
+left = x_min * W
+top = y_min * H
+width = (x_max - x_min) * W
+height = (y_max - y_min) * H
+```
+
+La imagen debe conservar la misma relación de aspecto visible; si el frontend usa `cover`, debe compensar el recorte antes de pintar las cajas.
+
+## Endpoints útiles
+
+- `GET /api/v1/health`: estado básico.
+- `GET /classes`: clases detectables, endpoint legacy.
+- `POST /detect`: endpoint legacy; usar `/api/v1/diagnostic/detect` para nuevas integraciones.
+
+## Pruebas
+
+```powershell
+venv311\Scripts\python.exe -m pytest -q
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload  para correrback
+
+```

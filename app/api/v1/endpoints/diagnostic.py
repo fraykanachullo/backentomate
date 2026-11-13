@@ -82,20 +82,37 @@ async def list_diagnostics(
     payload: dict = Depends(get_current_user),
     limit: int = 20,
     offset: int = 0,
+    mine: bool = False,
 ):
-    # FIELD_TECH solo ve suyos, ADMIN ve todos
-    q = select(Diagnostic).order_by(desc(Diagnostic.created_at)).limit(limit).offset(offset)
-    if payload.get("role") != "ADMIN":
+    # FIELD_TECH solo ve suyos, ADMIN ve todos (mine=true: solo los propios, p.ej.
+    # para descargar el historial al celular)
+    q = select(Diagnostic).order_by(desc(Diagnostic.created_at)).limit(min(limit, 200)).offset(offset)
+    if payload.get("role") != "ADMIN" or mine:
         q = q.where(Diagnostic.user_id == payload["user_id"])
     result = await db.execute(q)
     diags = result.scalars().all()
+    details = {}
+    if diags:
+        rows = await db.execute(select(DiagnosticDetail).where(DiagnosticDetail.diagnostic_id.in_([d.id for d in diags])))
+        for det in rows.scalars().all():
+            details.setdefault(det.diagnostic_id, []).append({
+                "disease_label": det.disease_label,
+                "confidence_score": det.confidence_score,
+                "bounding_box": det.bounding_box_json,
+            })
     return [
         {
             "diagnostic_id": d.id,
             "has_disease": d.has_disease,
             "total_detections": d.total_detections,
             "dominant_class": d.dominant_class,
+            "dominant_confidence": d.dominant_confidence,
             "image_url": d.image_url,
+            "model_version": d.model_version,
+            "latitude": d.latitude,
+            "longitude": d.longitude,
             "created_at": d.created_at.isoformat() if d.created_at else None,
+            "captured_at": d.captured_at.isoformat() if d.captured_at else None,
+            "detections": details.get(d.id, []),
         } for d in diags
     ]

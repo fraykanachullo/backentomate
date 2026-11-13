@@ -11,12 +11,12 @@ router = APIRouter()
 class RegisterRequest(BaseModel):
     name: str = Field(min_length=2, max_length=150)
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=6, max_length=128)
     role: str = Field(default="FIELD_TECH", pattern="^(ADMIN|FIELD_TECH)$")
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=6, max_length=128)
 
 class RefreshRequest(BaseModel):
     refresh_token: str

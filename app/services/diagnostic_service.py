@@ -4,11 +4,12 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.services.inference.preprocessor import validate_image
 from app.services.inference.yolo_engine import engine
 from app.services.inference.postprocessor import build_detections
+from app.services.inference.model_info import MODEL_INFO, MODEL_LABEL
 from app.models.orm.diagnostic import Diagnostic, DiagnosticDetail
 from app.models.orm.plot import Plot
 from app.storage.supabase_storage import upload_image
@@ -24,7 +25,10 @@ async def process_diagnostic(
     start = time.time()
 
     # 1. Validar imagen
-    pil = validate_image(image_bytes)
+    from app.core.config import settings
+    pil = validate_image(image_bytes, max_mb=settings.max_upload_size_mb)
+    # Aplicar rotacion EXIF para que las cajas coincidan con la imagen mostrada
+    pil = ImageOps.exif_transpose(pil).convert("RGB")
     width, height = pil.size
 
     # 2. Validar plot_id si viene
@@ -48,7 +52,6 @@ async def process_diagnostic(
         raise HTTPException(status_code=503, detail={"code": "INFERENCE_SERVICE_UNAVAILABLE", "message": str(e), "retry_after": 60})
 
     # 4. Postprocesar
-    from app.core.config import settings
     detections = build_detections(results, width, height, conf_thres=settings.confidence_threshold)
 
     # 5. Generar IDs y subir imagen
@@ -81,7 +84,7 @@ async def process_diagnostic(
         dominant_class=dominant["disease_label"] if dominant else None,
         dominant_confidence=dominant["confidence_score"] if dominant else None,
         processing_time_ms=int((time.time() - start) * 1000),
-        model_version="YOLOv8n-tomato-v1",
+        model_version=MODEL_LABEL,
         device_model=metadata.get("device_model"),
         app_version=metadata.get("app_version"),
         sync_status="synced",
@@ -125,11 +128,13 @@ async def process_diagnostic(
             "timestamp_capture_utc": captured_at.isoformat(),
         },
         "model_info": {
-            "model_name": "YOLOv8n-tomato-v1",
-            "model_version": "1.0.0",
+            "model_name": MODEL_INFO.get("name"),
+            "model_version": MODEL_INFO.get("version"),
+            "architecture": MODEL_INFO.get("architecture"),
             "inference_backend": "ultralytics",
-            "confidence_threshold": 0.40,
-            "iou_threshold": 0.45,
+            "confidence_threshold": settings.confidence_threshold,
+            "iou_threshold": settings.iou_threshold,
+            "image_size": settings.image_size,
         },
         "summary": {
             "total_detections": len(detections),

@@ -11,8 +11,8 @@ try:
 except:
     _has_supabase = False
 
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR = Path(settings.upload_dir)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 def _is_configured() -> bool:
     return _has_supabase and settings.supabase_url != "https://xyzabcdef.supabase.co" and "placeholder" not in settings.supabase_key
